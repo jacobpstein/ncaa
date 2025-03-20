@@ -16,6 +16,7 @@ set.seed(3192025)
 # Load necessary libraries
 library(tidyverse) # for pretty much everything
 library(janitor) # for cleaning up column names
+library(data.table) # for win streak calculation
 
 # Load NCAA data from Kaggle---
 # Get all CSV file paths
@@ -34,11 +35,10 @@ walk(csv_files, ~ assign(
 # at minimum we want 
 # - seeding 
 # - game outcome stats
-# - box score stats by player and team
+# - box score stats by team
 
 # for processing we also want to create the following:
 # - Score gap
-# - team continuity based on Jaccard Similarity
 
 # overall, we should end up with team level stats by game and player level stats by game
 # each dataset should contain the following:
@@ -46,56 +46,87 @@ walk(csv_files, ~ assign(
 # TeamID - a 4 digit id number, uniquely identifying each
 # TeamName - a compact spelling of the team's college name
 
-mens_combined__team_data <- 
-  # start with Ws and Ls in the regular season by team
-  MRegularSeasonCompactResults |> 
-  # drop location column
+mens_combined_team_data <-
+  MRegularSeasonDetailedResults |> 
   select(-w_loc) |> 
   # calculate the gap in score
   mutate(score_gap = w_score - l_score) |> 
   # rotate data from wide to long for easier analysis
-  pivot_longer(cols = c(w_team_id, l_team_id, w_score, l_score)
+  pivot_longer(cols = c(w_team_id, l_team_id, w_score, l_score, wfgm:lpf)
                , names_to = c("result", ".value")
-               , names_pattern = "([wl])_(.*)") |> 
-  # create numeric, binary outcome
-  mutate(result = ifelse(result == "w", 1, 0)
-         # make score gape negative for losing teams
-         , score_gap = ifelse(result == 0, -score_gap, score_gap)
-         , tourney = 0) |> 
-  # combine with tournament results
+               , names_pattern = "([wl])_?(.*)")  |> 
+  mutate(
+    result = ifelse(result == "w", 1, 0) # add binary result
+    , score_gap = ifelse(result == 0, -score_gap, score_gap)  # negative for losing teams
+    , fg_pct = ifelse(fga > 0, fgm / fga, NA)   # FG%
+    , fg3_pct = ifelse(fga3 > 0, fgm3 / fga3, NA) # 3P%
+    , ft_pct = ifelse(fta > 0, ftm / fta, NA)    # FT%
+    , tourney = 0 # tournament dummy
+  ) |> 
+  # add overall season win percentage 
+  group_by(season, team_id) |> 
+  mutate(win_pct = mean(result)) |> 
+  ungroup() |> 
+  # add win streak
+  arrange(season, day_num, team_id) |>  # ensure correct order
+  group_by(team_id) |>  
+  mutate(
+    win_streak = ave(result, cumsum(result == 0), FUN = cumsum)  # this resets the streak once a team gets an L
+    , games_played = row_number()  # count games played in the season
+    , current_season_wp = cumsum(result) / games_played  # running win percentage
+  ) |> 
+  ungroup() |> 
+ # Bring in tournament data
   bind_rows(
-    MNCAATourneyCompactResults |> 
-      # drop location
+    MNCAATourneyDetailedResults |> 
       select(-w_loc) |> 
       # calculate the gap in score
       mutate(score_gap = w_score - l_score) |> 
       # rotate data from wide to long for easier analysis
-      pivot_longer(cols = c(w_team_id, l_team_id, w_score, l_score)
+      pivot_longer(cols = c(w_team_id, l_team_id, w_score, l_score, wfgm:lpf)
                    , names_to = c("result", ".value")
-                   , names_pattern = "([wl])_(.*)") |> 
-      # create numeric, binary outcome
-      mutate(result = ifelse(result == "w", 1, 0)
-             # make score gape negative for losing teams
-             , score_gap = ifelse(result == 0, -score_gap, score_gap)
-             , tourney = 1) 
-  )
+                   , names_pattern = "([wl])_?(.*)")  |> 
+      mutate(
+        result = ifelse(result == "w", 1, 0) # Add binary result
+        , score_gap = ifelse(result == 0, -score_gap, score_gap)  # Negative for losing teams
+        , fg_pct = ifelse(fga > 0, fgm / fga, NA)   # FG%
+        , fg3_pct = ifelse(fga3 > 0, fgm3 / fga3, NA) # 3P%
+        , ft_pct = ifelse(fta > 0, ftm / fta, NA)    # FT%
+        , tourney = 1 # tournament dummy
+      ) |>  
+      # add in win streak just for matrix completion purposes
+      arrange(season, day_num, team_id) |>  # ensure correct order
+      group_by(team_id) |>  
+      mutate(
+        win_streak = ave(result, cumsum(result == 0), FUN = cumsum)  # this resets the streak once a team gets an L
+      ) |> 
+      ungroup() |> 
+      # add in tournament seeding
+      left_join(MNCAATourneySeeds |> select(team_id, season, seed))  
+  ) |> 
+  # bring in coaches
+  left_join(
+   MTeamCoaches |> 
+     # because there is more than one coach per season we need to collapse
+    group_by(season, team_id) |> 
+     # concatenate
+    summarize(coach = paste(unique(coach_name), collapse = ", "), .groups = "drop") |> 
+     ungroup() 
+  ) |> 
+  # bring in team names
+  left_join(MTeams |> select(team_id, team_name)) |> 
+  ungroup()
+  
 
 
 # little exploration to be deleted later
-MRegularSeasonCompactResults |> 
-  # drop location column
-  select(-w_loc) |> 
-  # calculate the gap in score
-  mutate(score_gap = w_score - l_score) |> 
-  # rotate data from wide to long for easier analysis
-  pivot_longer(cols = c(w_team_id, l_team_id, w_score, l_score)
-               , names_to = c("result", ".value")
-               , names_pattern = "([wl])_(.*)") |> 
-  # create numeric, binary outcome
-  mutate(result = ifelse(result == "w", 1, 0)
-         # make score gape negative for losing teams
-         , score_gap = ifelse(result == 0, -score_gap, score_gap)) |> 
+mens_combined_team_data |> 
+  mutate(tourney = ifelse(tourney == 1, "Tourney", "Regular Season")) |> 
   filter(result ==1) |> 
   ggplot(aes(x = season, y = score_gap)) + 
-  stat_summary(geom = "line") + stat_smooth()
+  stat_summary(geom = "pointrange") + stat_smooth() + 
+  facet_grid(~tourney) + usaidplot::usaid_plot() +
+  labs(x = "", y = "Score Gap")
+
+
 
