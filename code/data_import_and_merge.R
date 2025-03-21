@@ -46,7 +46,7 @@ walk(csv_files, ~ assign(
 # TeamID - a 4 digit id number, uniquely identifying each
 # TeamName - a compact spelling of the team's college name
 
-mens_combined_team_data <-
+mens_regular_season_df0 <-
   MRegularSeasonDetailedResults |> 
   select(-w_loc) |> 
   # calculate the gap in score
@@ -75,10 +75,21 @@ mens_combined_team_data <-
     , games_played = row_number()  # count games played in the season
     , current_season_wp = cumsum(result) / games_played  # running win percentage
   ) |> 
-  ungroup() |> 
- # Bring in tournament data
-  bind_rows(
-    MNCAATourneyDetailedResults |> 
+  ungroup() 
+
+final_regular_season_wp <- mens_regular_season_df0 |> 
+  group_by(team_id, season) |> 
+  summarize(prior_season_wp = max(current_season_wp, na.rm = TRUE), .groups = "drop") |> 
+  mutate(season = season + 1)  |> # shift season forward to match next year
+  ungroup()
+
+# Merge prior season win percentage back into the dataset
+mens_regular_season_df <- mens_regular_season_df0 |> 
+  left_join(final_regular_season_wp, by = c("team_id", "season"))
+
+# process tournament data
+mens_tourney_df0 <-
+  MNCAATourneyDetailedResults |> 
       select(-w_loc) |> 
       # calculate the gap in score
       mutate(score_gap = w_score - l_score) |> 
@@ -99,11 +110,28 @@ mens_combined_team_data <-
       group_by(team_id) |>  
       mutate(
         win_streak = ave(result, cumsum(result == 0), FUN = cumsum)  # this resets the streak once a team gets an L
+        , games_played = row_number()  # count games played in the season
+        , current_season_wp = cumsum(result) / games_played  # running win percentage
       ) |> 
       ungroup() |> 
       # add in tournament seeding
-      left_join(MNCAATourneySeeds |> select(team_id, season, seed))  
-  ) |> 
+      left_join(MNCAATourneySeeds |> select(team_id, season, seed)) |> 
+  ungroup() 
+
+# same as above
+final_tourney_wp <- mens_tourney_df0 |> 
+  group_by(team_id, season) |> 
+  summarize(prior_season_wp = max(current_season_wp, na.rm = TRUE), .groups = "drop") |> 
+  mutate(season = season + 1)  |> # shift season forward to match next year
+  ungroup()
+
+# Merge prior season win percentage back into the dataset
+mens_tourney_df <- mens_tourney_df0 |> 
+  left_join(final_tourney_wp, by = c("team_id", "season"))
+
+# Bring together the regular season and tournament data frames
+mens_combined_team_data <- mens_regular_season_df |> 
+  bind_rows(mens_tourney_df) |> 
   # bring in coaches
   left_join(
    MTeamCoaches |> 
@@ -120,13 +148,13 @@ mens_combined_team_data <-
 
 
 # little exploration to be deleted later
-mens_combined_team_data |> 
-  mutate(tourney = ifelse(tourney == 1, "Tourney", "Regular Season")) |> 
-  filter(result ==1) |> 
-  ggplot(aes(x = season, y = score_gap)) + 
-  stat_summary(geom = "pointrange") + stat_smooth() + 
-  facet_grid(~tourney) + usaidplot::usaid_plot() +
-  labs(x = "", y = "Score Gap")
+# mens_combined_team_data |> 
+#   mutate(tourney = ifelse(tourney == 1, "Tourney", "Regular Season")) |> 
+#   filter(result ==1) |> 
+#   ggplot(aes(x = season, y = score_gap)) + 
+#   stat_summary(geom = "pointrange") + stat_smooth() + 
+#   facet_grid(~tourney) + usaidplot::usaid_plot() +
+#   labs(x = "", y = "Score Gap")
 
-
-
+# correlations
+# cor(mens_combined_team_data[-c(30:32)], use = "complete.obs")
