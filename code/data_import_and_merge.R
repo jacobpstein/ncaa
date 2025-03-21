@@ -39,6 +39,7 @@ walk(csv_files, ~ assign(
 
 # for processing we also want to create the following:
 # - Score gap
+# - Some sort of ranking unrelated to seeding
 
 # overall, we should end up with team level stats by game and player level stats by game
 # each dataset should contain the following:
@@ -86,7 +87,16 @@ final_regular_season_wp <- mens_regular_season_df0 |>
 
 # Merge prior season win percentage back into the dataset
 mens_regular_season_df <- mens_regular_season_df0 |> 
-  left_join(final_regular_season_wp, by = c("game_id", "team_id", "season"))
+  left_join(final_regular_season_wp, by = c("game_id", "team_id", "season")) |> 
+  # add ranking based on wins
+  arrange(season, team_id, day_num) |>
+  group_by(season, team_id) |>
+  mutate(cum_wins = cumsum(result)) |>
+  ungroup() |>
+  group_by(season, day_num) |>
+  arrange(season, day_num, desc(cum_wins)) |>
+  mutate(rolling_rank = dense_rank(desc(cum_wins))) |>
+  ungroup()
 
 # process tournament data
 mens_tourney_df0 <-
@@ -149,7 +159,8 @@ mens_combined_team_data <- mens_regular_season_df |>
   mutate(seed_num = as.numeric(as.factor(seed))
          , coach_num = as.numeric(as.factor(coach))
          ) |> 
-  select(-coach, -seed) 
+  select(-coach, -seed) |> 
+  left_join(mens_regular_season_df |> select(team_id, season, rolling_rank, cum_wins) |> group_by(team_id, season) |> mutate(rolling_rank = mean(rolling_rank), cum_wins = sum(cum_wins)) |> ungroup())
 
 # create a data frame that is every possible combination
 team_combos0 <- expand.grid(MTeams$team_id, MTeams$team_id)
