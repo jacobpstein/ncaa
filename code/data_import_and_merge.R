@@ -50,7 +50,8 @@ mens_regular_season_df0 <-
   MRegularSeasonDetailedResults |> 
   select(-w_loc) |> 
   # calculate the gap in score
-  mutate(score_gap = w_score - l_score) |> 
+  mutate(score_gap = w_score - l_score
+         , game_id = paste0(season, "_", day_num, "_", w_team_id, "_", l_team_id)) |> 
   # rotate data from wide to long for easier analysis
   pivot_longer(cols = c(w_team_id, l_team_id, w_score, l_score, wfgm:lpf)
                , names_to = c("result", ".value")
@@ -78,21 +79,22 @@ mens_regular_season_df0 <-
   ungroup() 
 
 final_regular_season_wp <- mens_regular_season_df0 |> 
-  group_by(team_id, season) |> 
+  group_by(game_id, team_id, season) |> 
   summarize(prior_season_wp = max(current_season_wp, na.rm = TRUE), .groups = "drop") |> 
   mutate(season = season + 1)  |> # shift season forward to match next year
   ungroup()
 
 # Merge prior season win percentage back into the dataset
 mens_regular_season_df <- mens_regular_season_df0 |> 
-  left_join(final_regular_season_wp, by = c("team_id", "season"))
+  left_join(final_regular_season_wp, by = c("game_id", "team_id", "season"))
 
 # process tournament data
 mens_tourney_df0 <-
   MNCAATourneyDetailedResults |> 
       select(-w_loc) |> 
       # calculate the gap in score
-      mutate(score_gap = w_score - l_score) |> 
+      mutate(score_gap = w_score - l_score
+             , game_id = paste0(season, "_", day_num, "_", w_team_id, "_", l_team_id)) |> 
       # rotate data from wide to long for easier analysis
       pivot_longer(cols = c(w_team_id, l_team_id, w_score, l_score, wfgm:lpf)
                    , names_to = c("result", ".value")
@@ -120,14 +122,14 @@ mens_tourney_df0 <-
 
 # same as above
 final_tourney_wp <- mens_tourney_df0 |> 
-  group_by(team_id, season) |> 
+  group_by(game_id, team_id, season) |> 
   summarize(prior_season_wp = max(current_season_wp, na.rm = TRUE), .groups = "drop") |> 
   mutate(season = season + 1)  |> # shift season forward to match next year
   ungroup()
 
 # Merge prior season win percentage back into the dataset
 mens_tourney_df <- mens_tourney_df0 |> 
-  left_join(final_tourney_wp, by = c("team_id", "season"))
+  left_join(final_tourney_wp, by = c("game_id", "team_id", "season"))
 
 # Bring together the regular season and tournament data frames
 mens_combined_team_data <- mens_regular_season_df |> 
@@ -141,11 +143,24 @@ mens_combined_team_data <- mens_regular_season_df |>
     summarize(coach = paste(unique(coach_name), collapse = ", "), .groups = "drop") |> 
      ungroup() 
   ) |> 
-  # bring in team names
-  left_join(MTeams |> select(team_id, team_name)) |> 
-  ungroup()
-  
+  # bring in team names (optional)
+  left_join(MTeams |> select(team_id, team_name)) |>
+  ungroup() |> 
+  mutate(seed_num = as.numeric(as.factor(seed))
+         , coach_num = as.numeric(as.factor(coach))
+         ) |> 
+  select(-coach, -seed) 
 
+# create a data frame that is every possible combination
+team_combos0 <- expand.grid(MTeams$team_id, MTeams$team_id)
+
+# Drop self pairing
+team_combos <- team_combos0[team_combos0$Var1 != team_combos0$Var2, ] |> 
+  rename(team_id_A = Var1
+         , team_id_B = Var2)
+
+# clean up our environment so we just have our new data frame
+rm(list = ls()[!ls() %in% c("team_combos", "mens_combined_team_data")])
 
 # little exploration to be deleted later
 # mens_combined_team_data |> 
