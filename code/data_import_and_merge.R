@@ -1,5 +1,5 @@
 ###########################################################################
-# This file implements initial data cleaning and merging
+# This file implements initial data cleaning, processing, and merging
 # for modeling of NCAA victories. All data come from
 # https://www.kaggle.com/competitions/march-machine-learning-mania-2025/data
 # All files are stored in the data subfolder as .csv format
