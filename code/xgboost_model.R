@@ -54,7 +54,7 @@ for (stat in base_stats) {
 
 
 # Prepare training matrix
-X_train <- train_pairs|> select(ends_with("_diff"))|> as.matrix()
+X_train <- train_pairs|> select(ends_with("_diff"), rolling_rank_A, rolling_rank_B, -rolling_rank_diff)|> as.matrix()
 y_train <- train_pairs$result_A
 
 # Create our xgboost matrix
@@ -100,7 +100,7 @@ for (stat in base_stats) {
 
 # Predict
 X_pred <- team_combos_stats|>
-  select(ends_with("_diff"))|>
+  select(ends_with("_diff"), rolling_rank_A, rolling_rank_B, -rolling_rank_diff)|>
   as.matrix()
 
 team_combos_stats$pred_prob_teamA_win <- predict(xgb_model, X_pred)
